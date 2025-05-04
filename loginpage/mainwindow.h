@@ -25,6 +25,9 @@
 #include <QFormLayout>
 #include <QTextEdit>
 #include <QHeaderView>
+#include <QDateEdit>
+
+
 
 class MainWindow : public QMainWindow
 {
@@ -77,7 +80,8 @@ private:
     QString currentUser;
     QString dataFilePath;
 
-    struct Member {
+    class Member {
+    public:
         QString name;
         QString phone;
         QString email;
@@ -88,16 +92,27 @@ private:
         QDate expiryDate;
     };
 
-    struct Workout {
+    class Workout {
+    public:
         QString name;
         QString target;
         QString description;
         int sets;
         int reps;
     };
+    class Food {
+    public:
+        QString name;
+        double calories;
+        double protein;  // in grams
+        double carbs;    // in grams
+        double fat;      // in grams
+    };
 
     QList<Member> members;
     QList<Workout> workouts;
+    QVector<Food> foods;  // Add this to store your food database
+    QMap<QDate, QMap<QString, QVector<Food>>> foodDiary;
 
     // Main widget and stacked layout for switching between pages
     QWidget *centralWidget;
