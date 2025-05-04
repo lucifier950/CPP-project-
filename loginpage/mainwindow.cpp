@@ -1,5 +1,7 @@
 #include "mainwindow.h"
-
+#include <QFile>
+#include <QTextStream>
+#include<qcoreapplication.h>
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
@@ -11,17 +13,24 @@ MainWindow::MainWindow(QWidget *parent)
     stackedWidget = new QStackedWidget(this);
     mainLayout->addWidget(stackedWidget);
     mainLayout->setContentsMargins(0, 0, 0, 0);
-
-    // Add default admin account
-    userCredentials["admin"] = "password";
-
-    // Setup all pages
     setupLoginPage();
     setupSignUpPage();
     setupDashboardPage();
     setupMembersPage();
     setupWorkoutPage();
     setupCaloriesPage();
+
+    // Add default admin account
+    dataFilePath = QCoreApplication::applicationDirPath() + "/loginpage.csv";
+    if (QFile::exists(dataFilePath)) {
+        loadMembersFromFile(dataFilePath);
+    } else {
+        // Add default admin account
+        userCredentials["admin"] = "password";
+
+        // Only load sample data if no file exists
+        loadSampleData();
+    }
 
     // Add pages to stacked widget
     stackedWidget->addWidget(loginPage);
@@ -40,29 +49,36 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
-    // Qt's parent-child relationship will handle memory cleanup
+    saveMembersToFile(dataFilePath);
 }
 
 void MainWindow::loadSampleData()
 {
     // Sample members
     Member member1;
-    member1.name = "John Smith";
-    member1.phone = "555-1234";
-    member1.email = "john@example.com";
+    member1.name = "Advik Rajvansh";
+    member1.phone = "9899490181";
+    member1.email = "advikrajvansh@gmail.com";
+    member1.username = "advik121";
+    member1.password = "advik2512";
     member1.membershipType = "Annual";
     member1.joinDate = QDate::currentDate().addMonths(-3);
     member1.expiryDate = member1.joinDate.addYears(1);
     members.append(member1);
+    userCredentials[member1.username] = member1.password;
 
     Member member2;
-    member2.name = "Sarah Johnson";
-    member2.phone = "555-5678";
-    member2.email = "sarah@example.com";
+    member2.name = "Tushar Tandon";
+    member2.phone = "9870369632";
+    member2.email = "tushar@example.com";
+    member2.username = "chus121";
+    member2.password = "chus121";
     member2.membershipType = "Monthly";
     member2.joinDate = QDate::currentDate().addMonths(-1);
     member2.expiryDate = member2.joinDate.addMonths(1);
     members.append(member2);
+    userCredentials[member2.username] = member2.password;
+
 
     // Sample workouts
     Workout workout1;
@@ -153,6 +169,67 @@ void MainWindow::setupLoginPage()
     connect(clearLoginButton, &QPushButton::clicked, this, &MainWindow::onClearLoginButtonClicked);
     connect(showSignUpButton, &QPushButton::clicked, this, &MainWindow::onShowSignUpClicked);
 }
+
+// Save members list to a text file
+// Save members list to a text file
+void MainWindow::saveMembersToFile(const QString& filePath)
+{
+    QFile file(filePath);
+    if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QTextStream out(&file);
+        for (int i = 0; i < members.size(); ++i) {
+            const Member &member = members[i];
+            out << member.name << "," << member.phone << "," << member.email << ","
+                << member.username << "," << member.password << ","
+                << member.membershipType << "," << member.joinDate.toString(Qt::ISODate) << ","
+                << member.expiryDate.toString(Qt::ISODate) << "\n";
+
+            // Make sure username/password is in credentials map
+            userCredentials[member.username] = member.password;
+        }
+        file.close();
+        qDebug() << "Member data saved successfully to " + filePath;
+    } else {
+        QMessageBox::warning(nullptr, "File Error", "Unable to save members data to file: " + filePath + "\nError: " + file.errorString());
+        qDebug() << "Unable to save members data to file: " + filePath + "\nError: " + file.errorString();
+    }
+}
+
+// Load members list from a text file
+void MainWindow::loadMembersFromFile(const QString& filePath)
+{
+    QFile file(filePath);
+    if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QTextStream in(&file);
+        members.clear(); // Clear existing data
+        while (!in.atEnd()) {
+            QString line = in.readLine();
+            QStringList fields = line.split(",");
+            if (fields.size() == 8) {
+                Member m;
+                m.name = fields[0];
+                m.phone = fields[1];
+                m.email = fields[2];
+                m.username = fields[3];
+                m.password = fields[4];
+                m.membershipType = fields[5];
+                m.joinDate = QDate::fromString(fields[6], Qt::ISODate);
+                m.expiryDate = QDate::fromString(fields[7], Qt::ISODate);
+                members.append(m);
+
+                // Also add this user to login credentials if it doesn't exist
+                userCredentials[m.username] = m.password;
+                qDebug() << "Loaded user: " << m.username;
+            }
+        }
+        file.close();
+        updateMembersTable(); // Refresh table
+        qDebug() << "Member data loaded successfully from " + filePath;
+    } else {
+        qDebug() << "Unable to load members data from file: " + filePath + "\nError: " + file.errorString();
+    }
+}
+
 
 void MainWindow::setupSignUpPage()
 {
@@ -620,6 +697,17 @@ void MainWindow::onSignUpButtonClicked()
 
     // Register the new user
     userCredentials[username] = password;
+    Member newMember;
+    newMember.name = username; // Initially use username as name (can be updated later)
+    newMember.email = email;
+    newMember.username = username;
+    newMember.password = password;
+    newMember.membershipType = "Monthly"; // Default membership type
+    newMember.joinDate = QDate::currentDate();
+    newMember.expiryDate = newMember.joinDate.addMonths(1);
+    members.append(newMember);
+
+    saveMembersToFile(dataFilePath);
 
     signUpStatusLabel->setText("Registration successful!");
     QMessageBox::information(this, "Registration Successful",
@@ -694,21 +782,51 @@ void MainWindow::onBackFromCaloriesButtonClicked()
 
 void MainWindow::updateMembersTable()
 {
+    // Check if membersTable is initialized
+    if (!membersTable) {
+        qDebug() << "Error: membersTable is not initialized";
+        return;
+    }
+
     // Clear the table
     membersTable->setRowCount(0);
 
     // Populate the table with members
     for (int i = 0; i < members.size(); ++i) {
-        membersTable->insertRow(i);
-        membersTable->setItem(i, 0, new QTableWidgetItem(members[i].name));
-        membersTable->setItem(i, 1, new QTableWidgetItem(members[i].phone));
-        membersTable->setItem(i, 2, new QTableWidgetItem(members[i].email));
-        membersTable->setItem(i, 3, new QTableWidgetItem(members[i].membershipType));
-        membersTable->setItem(i, 4, new QTableWidgetItem(members[i].joinDate.toString("dd/MM/yyyy")));
-        membersTable->setItem(i, 5, new QTableWidgetItem(members[i].expiryDate.toString("dd/MM/yyyy")));
-    }
-}
+        const Member& member = members[i];
 
+        // Insert new row
+        int row = membersTable->rowCount();
+        membersTable->insertRow(row);
+
+        // Create and set items with null checks
+        QTableWidgetItem* nameItem = new QTableWidgetItem(member.name);
+        QTableWidgetItem* phoneItem = new QTableWidgetItem(member.phone);
+        QTableWidgetItem* emailItem = new QTableWidgetItem(member.email);
+        QTableWidgetItem* typeItem = new QTableWidgetItem(member.membershipType);
+
+        // Format dates safely
+        QString joinDateStr = member.joinDate.isValid() ?
+                                  member.joinDate.toString("dd/MM/yyyy") : "Invalid Date";
+        QString expiryDateStr = member.expiryDate.isValid() ?
+                                    member.expiryDate.toString("dd/MM/yyyy") : "Invalid Date";
+
+        QTableWidgetItem* joinDateItem = new QTableWidgetItem(joinDateStr);
+        QTableWidgetItem* expiryDateItem = new QTableWidgetItem(expiryDateStr);
+
+        // Set items in table
+        membersTable->setItem(row, 0, nameItem);
+        membersTable->setItem(row, 1, phoneItem);
+        membersTable->setItem(row, 2, emailItem);
+        membersTable->setItem(row, 3, typeItem);
+        membersTable->setItem(row, 4, joinDateItem);
+        membersTable->setItem(row, 5, expiryDateItem);
+    }
+
+    // Resize columns to fit content
+    membersTable->resizeColumnsToContents();
+}
+// ... existing code ...
 void MainWindow::updateWorkoutTable()
 {
     // Clear the table
@@ -737,10 +855,26 @@ void MainWindow::onAddMemberButtonClicked()
         return;
     }
 
+    // Generate a username based on the name (remove spaces and make lowercase)
+    QString username = name.toLower().replace(" ", "");
+
+    // Check if username already exists, if so add a number
+    QString baseUsername = username;
+    int suffix = 1;
+    while (userCredentials.contains(username)) {
+        username = baseUsername + QString::number(suffix);
+        suffix++;
+    }
+
+    // Generate a default password (could be improved for security)
+    QString password = username + "123";
+
     Member newMember;
     newMember.name = name;
     newMember.phone = phone;
     newMember.email = email;
+    newMember.username = username;
+    newMember.password = password;
     newMember.membershipType = membershipType;
     newMember.joinDate = QDate::currentDate();
 
@@ -753,7 +887,10 @@ void MainWindow::onAddMemberButtonClicked()
         newMember.expiryDate = newMember.joinDate.addYears(1);
     }
 
+    // Add member to list and update credentials
     members.append(newMember);
+    userCredentials[username] = password;
+
     updateMembersTable();
 
     // Clear inputs
@@ -761,7 +898,7 @@ void MainWindow::onAddMemberButtonClicked()
     memberPhoneInput->clear();
     memberEmailInput->clear();
 
-    QMessageBox::information(this, "Success", "Member added successfully!");
+    QMessageBox::information(this, "Success", "Member added successfully!\n\nUsername: " + username + "\nPassword: " + password);
 }
 
 void MainWindow::onDeleteMemberButtonClicked()
