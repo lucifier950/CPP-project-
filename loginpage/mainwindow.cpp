@@ -5,6 +5,7 @@
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
+    this->resize(900, 600);//set the initial
     // Set up the central widget and stacked widget for page switching
     centralWidget = new QWidget(this);
     setCentralWidget(centralWidget);
@@ -19,6 +20,46 @@ MainWindow::MainWindow(QWidget *parent)
     setupMembersPage();
     setupWorkoutPage();
     setupCaloriesPage();
+
+    Food apple;
+    apple.name = "Apple";
+    apple.calories = 95;
+    apple.protein = 0.5;
+    apple.carbs = 25;
+    apple.fat = 0.3;
+    foods.append(apple);
+
+    Food chickenBreast;
+    chickenBreast.name = "Chicken Breast";
+    chickenBreast.calories = 165;
+    chickenBreast.protein = 31;
+    chickenBreast.carbs = 0;
+    chickenBreast.fat = 3.6;
+    foods.append(chickenBreast);
+
+    Food rice;
+    rice.name = "White Rice";
+    rice.calories = 205;
+    rice.protein = 4.3;
+    rice.carbs = 45;
+    rice.fat = 0.4;
+    foods.append(rice);
+
+    Food banana;
+    banana.name = "Banana";
+    banana.calories = 105;
+    banana.protein = 1.3;
+    banana.carbs = 27;
+    banana.fat = 0.4;
+    foods.append(banana);
+
+    Food eggs;
+    eggs.name = "Eggs (2 large)";
+    eggs.calories = 140;
+    eggs.protein = 12;
+    eggs.carbs = 1;
+    eggs.fat = 10;
+    foods.append(eggs);
 
     // Add default admin account
     dataFilePath = QCoreApplication::applicationDirPath() + "/loginpage.csv";
@@ -112,6 +153,21 @@ void MainWindow::setupLoginPage()
     loginPage = new QWidget(this);
     loginLayout = new QGridLayout(loginPage);
 
+    // Set background image
+    loginPage->setStyleSheet(
+        "background-image: url(:/resources/gym.jpg);"
+        "background-repeat: no-repeat;"
+        "background-position: center;"
+        "background-size: contain;"
+        );
+
+
+    // Semi-transparent overlay for the form
+    QWidget* overlay = new QWidget(loginPage);
+    overlay->setStyleSheet("background: rgba(0, 0, 0, 0.2); border-radius: 20px;");
+    overlay->setGeometry(120, 40, 600, 400);
+    overlay->lower();
+
     // Create title
     loginTitleLabel = new QLabel("FitLife Gym", this);
     QFont titleFont = loginTitleLabel->font();
@@ -124,21 +180,55 @@ void MainWindow::setupLoginPage()
     usernameLabel = new QLabel("Username:", this);
     usernameInput = new QLineEdit(this);
     usernameInput->setPlaceholderText("Enter your username");
+    usernameInput->setStyleSheet(
+        "QLineEdit {"
+        "background: rgba(0,0,0,0.2);"
+        "color: #fff;"
+        "border: 1px solid #fff;"
+        "border-radius: 6px;"
+        "padding: 6px;"
+        "font-size: 15px;"
+        "}"
+        );
 
     // Create password components
     passwordLabel = new QLabel("Password:", this);
     passwordInput = new QLineEdit(this);
     passwordInput->setPlaceholderText("Enter your password");
     passwordInput->setEchoMode(QLineEdit::Password);
+    passwordInput->setStyleSheet(usernameInput->styleSheet());
 
     // Create buttons
-    loginButton = new QPushButton("Login", this);
-    clearLoginButton = new QPushButton("Clear", this);
+    loginButton = new QPushButton(QIcon(":/resources/login.png"), "Login", this);
+    clearLoginButton = new QPushButton(QIcon(":/resources/clear.png"), "Clear", this);
     showSignUpButton = new QPushButton("Create New Account", this);
+    QString buttonStyle =
+        "QPushButton {"
+        "background: rgba(0,0,0,0.3);"
+        "color: #fff;"
+        "border-radius: 8px;"
+        "padding: 10px 0;"
+        "font-size: 16px;"
+        "border: 1px solid #fff;"
+        "}"
+        "QPushButton:hover {"
+        "background: rgba(0,0,0,0.5);"
+        "}";
+    loginButton->setStyleSheet(buttonStyle);
+    clearLoginButton->setStyleSheet(buttonStyle);
+    showSignUpButton->setStyleSheet(buttonStyle);
+
+
 
     // Create status label
     loginStatusLabel = new QLabel("Please log in to access the gym management system", this);
     loginStatusLabel->setAlignment(Qt::AlignCenter);
+    // For labels (optional, for extra clarity)
+    loginTitleLabel->setStyleSheet("background: transparent; color: #fff; font-size: 32px; font-weight: bold;");
+    loginStatusLabel->setStyleSheet("background: transparent; color: #fff;");
+    usernameLabel->setStyleSheet("background: transparent; color: #fff;");
+    passwordLabel->setStyleSheet("background: transparent; color: #fff;");
+
 
     // Add widgets to layout
     loginLayout->addWidget(loginTitleLabel, 0, 0, 1, 2);
@@ -168,8 +258,11 @@ void MainWindow::setupLoginPage()
     connect(loginButton, &QPushButton::clicked, this, &MainWindow::onLoginButtonClicked);
     connect(clearLoginButton, &QPushButton::clicked, this, &MainWindow::onClearLoginButtonClicked);
     connect(showSignUpButton, &QPushButton::clicked, this, &MainWindow::onShowSignUpClicked);
+    //for pressing enter
+    loginButton->setDefault(true);
+    connect(passwordInput, &QLineEdit::returnPressed, this, &MainWindow::onLoginButtonClicked);
+    connect(usernameInput, &QLineEdit::returnPressed, this, &MainWindow::onLoginButtonClicked);
 }
-
 // Save members list to a text file
 // Save members list to a text file
 void MainWindow::saveMembersToFile(const QString& filePath)
@@ -236,6 +329,13 @@ void MainWindow::setupSignUpPage()
     // Create sign up page widget
     signUpPage = new QWidget(this);
     signUpLayout = new QGridLayout(signUpPage);
+    //background image
+    signUpPage->setStyleSheet(
+        "background-image: url(:/resources/gym.jpg);"
+        "background-repeat: no-repeat;"
+        "background-position: center;"
+        "background-size: cover;"
+        );
 
     // Create title
     signUpTitleLabel = new QLabel("FitLife Gym", this);
@@ -244,37 +344,73 @@ void MainWindow::setupSignUpPage()
     titleFont.setBold(true);
     signUpTitleLabel->setFont(titleFont);
     signUpTitleLabel->setAlignment(Qt::AlignCenter);
+    signUpTitleLabel->setStyleSheet("background: transparent; color: #fff; font-size: 32px; font-weight: bold;");
+
 
     // Create username components
     newUsernameLabel = new QLabel("Username:", this);
     newUsernameInput = new QLineEdit(this);
     newUsernameInput->setPlaceholderText("Choose a username");
+    newUsernameInput->setStyleSheet(
+        "QLineEdit {"
+        "background: rgba(0,0,0,0.2);"
+        "color: #fff;"
+        "border: 1px solid #fff;"
+        "border-radius: 6px;"
+        "padding: 6px;"
+        "font-size: 15px;"
+        "}"
+        );
+    newUsernameLabel->setStyleSheet("background: transparent; color: #fff;");
 
     // Create password components
     newPasswordLabel = new QLabel("Password:", this);
     newPasswordInput = new QLineEdit(this);
     newPasswordInput->setPlaceholderText("Create a password");
     newPasswordInput->setEchoMode(QLineEdit::Password);
+    newPasswordInput->setStyleSheet(newUsernameInput->styleSheet());
+    newPasswordLabel->setStyleSheet("background: transparent; color: #fff;");
 
     // Create confirm password components
     confirmPasswordLabel = new QLabel("Confirm Password:", this);
     confirmPasswordInput = new QLineEdit(this);
     confirmPasswordInput->setPlaceholderText("Confirm your password");
     confirmPasswordInput->setEchoMode(QLineEdit::Password);
+    confirmPasswordInput->setStyleSheet(newUsernameInput->styleSheet());
+    confirmPasswordLabel->setStyleSheet("background: transparent; color: #fff;");
 
     // Create email components
     emailLabel = new QLabel("Email:", this);
     emailInput = new QLineEdit(this);
     emailInput->setPlaceholderText("Enter your email");
+    emailInput->setStyleSheet(newUsernameInput->styleSheet());
+    emailLabel->setStyleSheet("background: transparent; color: #fff;");
+
 
     // Create buttons
-    signUpButton = new QPushButton("Register", this);
-    clearSignUpButton = new QPushButton("Clear", this);
+    signUpButton = new QPushButton(QIcon(":/resources/register.png"),"Register", this);
+    clearSignUpButton = new QPushButton(QIcon(":/resources/clear.png"),"Clear", this);
     showLoginButton = new QPushButton("Back to Login", this);
+    QString buttonStyle =
+        "QPushButton {"
+        "background: rgba(0,0,0,0.3);"
+        "color: #fff;"
+        "border-radius: 8px;"
+        "padding: 10px 0;"
+        "font-size: 16px;"
+        "border: 1px solid #fff;"
+        "}"
+        "QPushButton:hover {"
+        "background: rgba(0,0,0,0.5);"
+        "}";
+    signUpButton->setStyleSheet(buttonStyle);
+    clearSignUpButton->setStyleSheet(buttonStyle);
+    showLoginButton->setStyleSheet(buttonStyle);
 
     // Create status label
     signUpStatusLabel = new QLabel("Please fill in all fields to create your account", this);
     signUpStatusLabel->setAlignment(Qt::AlignCenter);
+    signUpStatusLabel->setStyleSheet("background: transparent; color: #fff;");
 
     // Add widgets to layout
     signUpLayout->addWidget(signUpTitleLabel, 0, 0, 1, 2);
@@ -308,59 +444,99 @@ void MainWindow::setupSignUpPage()
     connect(signUpButton, &QPushButton::clicked, this, &MainWindow::onSignUpButtonClicked);
     connect(clearSignUpButton, &QPushButton::clicked, this, &MainWindow::onClearSignUpButtonClicked);
     connect(showLoginButton, &QPushButton::clicked, this, &MainWindow::onShowLoginClicked);
+    //For pressing enter when done signing up
+    connect(newUsernameInput, &QLineEdit::returnPressed, this, &MainWindow::onSignUpButtonClicked);
+    connect(newPasswordInput, &QLineEdit::returnPressed, this, &MainWindow::onSignUpButtonClicked);
+    connect(confirmPasswordInput, &QLineEdit::returnPressed, this, &MainWindow::onSignUpButtonClicked);
+    connect(emailInput, &QLineEdit::returnPressed, this, &MainWindow::onSignUpButtonClicked);
 }
 
 void MainWindow::setupDashboardPage()
 {
-    // Create dashboard page widget
     dashboardPage = new QWidget(this);
-    dashboardLayout = new QVBoxLayout(dashboardPage);
+    QVBoxLayout* mainLayout = new QVBoxLayout(dashboardPage);
+    welcomeLabel = new QLabel(this); // or with your rich text, etc.
+    mainLayout->addWidget(welcomeLabel);
 
-    // Create welcome label
-    welcomeLabel = new QLabel("Welcome to FitLife Gym Management System", this);
-    QFont titleFont = welcomeLabel->font();
-    titleFont.setPointSize(20);
-    titleFont.setBold(true);
-    welcomeLabel->setFont(titleFont);
+    // Set background image or gradient
+    dashboardPage->setStyleSheet(
+        "background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #232526, stop:1 #414345);"
+        );
+
+    // Welcome label
+    QLabel* welcomeLabel = new QLabel(
+        QString("Welcome to <span style='color:#00bfff;'>FitLife Gym Management System</span>, <b>%1</b>!")
+            .arg(currentUser), this);
+    welcomeLabel->setTextFormat(Qt::RichText);
     welcomeLabel->setAlignment(Qt::AlignCenter);
+    QFont welcomeFont = welcomeLabel->font();
+    welcomeFont.setPointSize(26);
+    welcomeFont.setBold(true);
+    welcomeLabel->setFont(welcomeFont);
+    welcomeLabel->setStyleSheet("color: white; text-shadow: 2px 2px 8px #000; margin-bottom: 40px;");
 
-    // Create dashboard buttons
-    membersButton = new QPushButton("Manage Members", this);
-    membersButton->setMinimumHeight(60);
+    mainLayout->addWidget(welcomeLabel);
 
-    workoutPlanButton = new QPushButton("Workout Plans", this);
-    workoutPlanButton->setMinimumHeight(60);
+    // Button layout
+    QHBoxLayout* buttonLayout = new QHBoxLayout();
 
-    calorieCalculatorButton = new QPushButton("Calorie Calculator", this);
-    calorieCalculatorButton->setMinimumHeight(60);
+    // Card-style buttons with icons
+    QPushButton* membersBtn = new QPushButton(QIcon(":/resources/members.png"), "Manage Members", this);
+    QPushButton* workoutBtn = new QPushButton(QIcon(":/resources/workout.png"), "Workout Plans", this);
+    QPushButton* calorieBtn = new QPushButton(QIcon(":/resources/calorie.png"), "Calorie Calculator", this);
 
-    logoutButton = new QPushButton("Logout", this);
+    QString cardStyle =
+        "QPushButton {"
+        "background: rgba(255,255,255,0.08);"
+        "color: #fff;"
+        "border-radius: 18px;"
+        "padding: 30px 40px;"
+        "font-size: 20px;"
+        "font-weight: 600;"
+        "box-shadow: 0 4px 24px rgba(0,0,0,0.2);"
+        "border: 2px solid #00bfff;"
+        "margin: 0 20px;"
+        "}"
+        "QPushButton:hover {"
+        "background: #00bfff;"
+        "color: #232526;"
+        "}";
+    membersBtn->setStyleSheet(cardStyle);
+    workoutBtn->setStyleSheet(cardStyle);
+    calorieBtn->setStyleSheet(cardStyle);
 
-    // Add widgets to layout
-    dashboardLayout->addWidget(welcomeLabel);
-    dashboardLayout->addSpacing(30);
+    membersBtn->setIconSize(QSize(40, 40));
+    workoutBtn->setIconSize(QSize(40, 40));
+    calorieBtn->setIconSize(QSize(40, 40));
 
-    QHBoxLayout *buttonsLayout = new QHBoxLayout();
-    buttonsLayout->addWidget(membersButton);
-    buttonsLayout->addWidget(workoutPlanButton);
-    buttonsLayout->addWidget(calorieCalculatorButton);
+    buttonLayout->addWidget(membersBtn);
+    buttonLayout->addWidget(workoutBtn);
+    buttonLayout->addWidget(calorieBtn);
 
-    dashboardLayout->addLayout(buttonsLayout);
-    dashboardLayout->addSpacing(30);
-    dashboardLayout->addWidget(logoutButton, 0, Qt::AlignRight);
+    mainLayout->addLayout(buttonLayout);
 
-    // Add stretch to push everything to the top
-    dashboardLayout->addStretch();
-
-    // Set some spacing and margins
-    dashboardLayout->setSpacing(15);
-    dashboardLayout->setContentsMargins(40, 40, 40, 40);
+    // Logout button
+    QPushButton* logoutBtn = new QPushButton("Logout", this);
+    logoutBtn->setStyleSheet(
+        "QPushButton {"
+        "background: #333;"
+        "color: #fff;"
+        "border-radius: 8px;"
+        "padding: 8px 24px;"
+        "font-size: 14px;"
+        "margin-top: 40px;"
+        "}"
+        "QPushButton:hover {"
+        "background: #ff4d4d;"
+        "}"
+        );
+    mainLayout->addWidget(logoutBtn, 0, Qt::AlignRight);
 
     // Connect signals and slots
-    connect(logoutButton, &QPushButton::clicked, this, &MainWindow::onLogoutButtonClicked);
-    connect(membersButton, &QPushButton::clicked, this, &MainWindow::onMembersButtonClicked);
-    connect(workoutPlanButton, &QPushButton::clicked, this, &MainWindow::onWorkoutPlanButtonClicked);
-    connect(calorieCalculatorButton, &QPushButton::clicked, this, &MainWindow::onCalorieCalculatorButtonClicked);
+    connect(logoutBtn, &QPushButton::clicked, this, &MainWindow::onLogoutButtonClicked);
+    connect(membersBtn, &QPushButton::clicked, this, &MainWindow::onMembersButtonClicked);
+    connect(workoutBtn, &QPushButton::clicked, this, &MainWindow::onWorkoutPlanButtonClicked);
+    connect(calorieBtn, &QPushButton::clicked, this, &MainWindow::onCalorieCalculatorButtonClicked);
 }
 
 void MainWindow::setupMembersPage()
@@ -631,7 +807,7 @@ void MainWindow::onLoginButtonClicked()
     if (userCredentials.contains(username) && userCredentials[username] == password) {
         currentUser = username;
         loginStatusLabel->setText("Login successful!");
-        welcomeLabel->setText("Welcome to FitLife Gym Management System, " + username + "!");
+       // welcomeLabel->setText("Welcome to FitLife Gym Management System, " + username + "!");
 
         // Update tables
         updateMembersTable();
@@ -741,11 +917,32 @@ void MainWindow::onShowLoginClicked()
 
 void MainWindow::onLogoutButtonClicked()
 {
+    qDebug() << "Logout clicked";
     currentUser = "";
-    usernameInput->clear();
-    passwordInput->clear();
-    loginStatusLabel->setText("Please log in to access the gym management system");
-    stackedWidget->setCurrentWidget(loginPage);
+    if (usernameInput) {
+        qDebug() << "Clearing usernameInput";
+        usernameInput->clear();
+    } else {
+        qDebug() << "usernameInput is nullptr";
+    }
+    if (passwordInput) {
+        qDebug() << "Clearing passwordInput";
+        passwordInput->clear();
+    } else {
+        qDebug() << "passwordInput is nullptr";
+    }
+    if (loginStatusLabel) {
+        qDebug() << "Setting loginStatusLabel";
+        loginStatusLabel->setText("Please log in to access the gym management system");
+    } else {
+        qDebug() << "loginStatusLabel is nullptr";
+    }
+    if (stackedWidget && loginPage) {
+        qDebug() << "Switching to loginPage";
+        stackedWidget->setCurrentWidget(loginPage);
+    } else {
+        qDebug() << "stackedWidget or loginPage is nullptr";
+    }
 }
 
 void MainWindow::onMembersButtonClicked()
