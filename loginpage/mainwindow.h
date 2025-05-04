@@ -33,6 +33,9 @@ class MainWindow : public QMainWindow
 public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
+    // file handling functions - now accessible everywhere
+    void saveMembersToFile(const QString& filePath);
+    void loadMembersFromFile(const QString& filePath);
 
 private slots:
     // Login page slots
@@ -72,11 +75,14 @@ private:
     // User data storage (in a real app, this would be in a database)
     QMap<QString, QString> userCredentials;
     QString currentUser;
+    QString dataFilePath;
 
     struct Member {
         QString name;
         QString phone;
         QString email;
+        QString username;
+        QString password;
         QString membershipType;
         QDate joinDate;
         QDate expiryDate;
