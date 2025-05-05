@@ -2,6 +2,14 @@
 #include <QFile>
 #include <QTextStream>
 #include<qcoreapplication.h>
+#include "mainwindow.h"
+#include <QFile>
+#include <QTextStream>
+#include <QDateTime>
+#include <qcoreapplication.h>
+#include <QtCharts/QLineSeries>
+#include <QtCharts/QDateTimeAxis>
+#include <QtCharts/QValueAxis>
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
@@ -9,6 +17,11 @@ MainWindow::MainWindow(QWidget *parent)
     // Set up the central widget and stacked widget for page switching
     centralWidget = new QWidget(this);
     setCentralWidget(centralWidget);
+    weightHistoryFilePath = QCoreApplication::applicationDirPath() + "/weight_history.csv";
+    foodsFilePath = QCoreApplication::applicationDirPath() + "/foods.csv";
+    foodDiaryFilePath = QCoreApplication::applicationDirPath() + "/food_diary.csv";
+    loadFoodsFromFile();
+    loadFoodDiaryFromFile();
 
     QVBoxLayout *mainLayout = new QVBoxLayout(centralWidget);
     stackedWidget = new QStackedWidget(this);
@@ -86,11 +99,20 @@ MainWindow::MainWindow(QWidget *parent)
 
     // Load sample data
     loadSampleData();
+
+    setupWeightTrackingPage();
+    stackedWidget->addWidget(weightTrackingPage);
+    loadWeightHistoryFromFile();
+    updateWeightTable();
+    updateWeightChart();
 }
 
 MainWindow::~MainWindow()
 {
+    saveFoodsToFile();
+    saveFoodDiaryToFile();
     saveMembersToFile(dataFilePath);
+    saveWeightHistoryToFile();
 }
 
 void MainWindow::loadSampleData()
@@ -146,30 +168,314 @@ void MainWindow::loadSampleData()
     workout3.reps = 8;
     workouts.append(workout3);
 }
+void MainWindow::saveFoodsToFile() {
+    QFile file(foodsFilePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return;
+    QTextStream out(&file);
+    out << "Name,Calories,Protein,Carbs,Fat\n";
+    for (int i = 0; i < foods.size(); ++i) {
+        const Food &food = foods.at(i);
+        out << food.name << "," << food.calories << "," << food.protein << "," << food.carbs << "," << food.fat << "\n";
+    }
+    file.close();
+}
+void MainWindow::loadFoodsFromFile() {
+    QFile file(foodsFilePath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return;
+    QTextStream in(&file);
+    if (!in.atEnd()) in.readLine(); // skip header
+    foods.clear();
+    while (!in.atEnd()) {
+        QStringList fields = in.readLine().split(",");
+        if (fields.size() == 5) {
+            Food food{fields[0], fields[1].toDouble(), fields[2].toDouble(), fields[3].toDouble(), fields[4].toDouble()};
+            foods.append(food);
+        }
+    }
+    file.close();
+}
+void MainWindow::saveFoodDiaryToFile() {
+    QFile file(foodDiaryFilePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return;
+    QTextStream out(&file);
+    out << "Date,Meal,Food,Calories,Protein,Carbs,Fat\n";
+    for (auto dateIt = foodDiary.begin(); dateIt != foodDiary.end(); ++dateIt) {
+        QDate date = dateIt.key();
+        for (auto mealIt = dateIt.value().begin(); mealIt != dateIt.value().end(); ++mealIt) {
+            QString meal = mealIt.key();
+            const auto &mealFoods = mealIt.value();
+            for (const Food &food : mealFoods)
+                out << date.toString(Qt::ISODate) << "," << meal << "," << food.name << "," << food.calories << "," << food.protein << "," << food.carbs << "," << food.fat << "\n";
+        }
+    }
+    file.close();
+}
+void MainWindow::loadFoodDiaryFromFile() {
+    QFile file(foodDiaryFilePath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return;
+    QTextStream in(&file);
+    if (!in.atEnd()) in.readLine(); // skip header
+    foodDiary.clear();
+    while (!in.atEnd()) {
+        QStringList fields = in.readLine().split(",");
+        if (fields.size() == 7) {
+            QDate date = QDate::fromString(fields[0], Qt::ISODate);
+            QString meal = fields[1];
+            Food food{fields[2], fields[3].toDouble(), fields[4].toDouble(), fields[5].toDouble(), fields[6].toDouble()};
+            foodDiary[date][meal].append(food);
+        }
+    }
+    file.close();
+}
+void MainWindow::onFoodSearchTextChanged(const QString &text) {
+    QListWidget* foodSearchResults = findChild<QListWidget*>("foodSearchResults");
+    if (!foodSearchResults) return;
+    foodSearchResults->clear();
+    for (int i = 0; i < foods.size(); ++i) {
+        const Food &food = foods.at(i);
+        if (food.name.contains(text, Qt::CaseInsensitive)) {
+            QString displayText = QString("%1 (%2 kcal, P:%3g, C:%4g, F:%5g)")
+            .arg(food.name).arg(food.calories).arg(food.protein).arg(food.carbs).arg(food.fat);
+            QListWidgetItem* item = new QListWidgetItem(displayText);
+            item->setData(Qt::UserRole, QVariant::fromValue(food));
+            foodSearchResults->addItem(item);
+        }
+    }
+}
+void MainWindow::onFoodSelected(QListWidgetItem* item) {
+    if (!item) return;
+    Food selectedFood = item->data(Qt::UserRole).value<Food>();
+    QDateEdit* diaryDateEdit = findChild<QDateEdit*>("diaryDateEdit");
+    QComboBox* mealCombo = findChild<QComboBox*>("mealCombo");
+    QTableWidget* diaryTable = findChild<QTableWidget*>("diaryTable");
+    if (!diaryDateEdit || !mealCombo || !diaryTable) return;
+    QDate date = diaryDateEdit->date();
+    QString meal = mealCombo->currentText();
+    foodDiary[date][meal].append(selectedFood);
+    int row = diaryTable->rowCount();
+    diaryTable->insertRow(row);
+    diaryTable->setItem(row, 0, new QTableWidgetItem(selectedFood.name));
+    diaryTable->setItem(row, 1, new QTableWidgetItem(QString::number(selectedFood.calories)));
+    diaryTable->setItem(row, 2, new QTableWidgetItem(QString::number(selectedFood.protein)));
+    diaryTable->setItem(row, 3, new QTableWidgetItem(QString::number(selectedFood.carbs)));
+    diaryTable->setItem(row, 4, new QTableWidgetItem(QString::number(selectedFood.fat)));
+    updateNutritionSummary();
+    saveFoodDiaryToFile();
+}
+void MainWindow::updateNutritionSummary() {
+    QDateEdit* diaryDateEdit = findChild<QDateEdit*>("diaryDateEdit");
+    QComboBox* mealCombo = findChild<QComboBox*>("mealCombo");
+    QLabel* caloriesLabel = findChild<QLabel*>("caloriesLabel");
+    QLabel* proteinLabel = findChild<QLabel*>("proteinLabel");
+    QLabel* carbsLabel = findChild<QLabel*>("carbsLabel");
+    QLabel* fatLabel = findChild<QLabel*>("fatLabel");
+    QProgressBar* calorieProgress = findChild<QProgressBar*>("calorieProgress");
+    QSpinBox* goalSpin = findChild<QSpinBox*>("goalSpin");
+    if (!diaryDateEdit || !mealCombo || !caloriesLabel || !proteinLabel || !carbsLabel || !fatLabel || !calorieProgress || !goalSpin) return;
+    QDate date = diaryDateEdit->date();
+    QString meal = mealCombo->currentText();
+    double totalCalories = 0, totalProtein = 0, totalCarbs = 0, totalFat = 0;
+    const auto &mealList = foodDiary[date][meal];
+    for (int i = 0; i < mealList.size(); ++i) {
+        const Food &food = mealList.at(i);
+        totalCalories += food.calories;
+        totalProtein += food.protein;
+        totalCarbs += food.carbs;
+        totalFat += food.fat;
+    }
+    caloriesLabel->setText(QString("Calories: %1 kcal").arg(totalCalories));
+    proteinLabel->setText(QString("Protein: %1 g").arg(totalProtein));
+    carbsLabel->setText(QString("Carbs: %1 g").arg(totalCarbs));
+    fatLabel->setText(QString("Fat: %1 g").arg(totalFat));
+    calorieProgress->setValue(totalCalories);
+    calorieProgress->setMaximum(goalSpin->value());
+    updateMacroChart(totalProtein, totalCarbs, totalFat);
+}
+void MainWindow::updateMacroChart(double protein, double carbs, double fat) {
+    QChartView* macroChartView = findChild<QChartView*>("macroChartView");
+    if (!macroChartView) return;
+    QChart* chart = macroChartView->chart();
+    if (!chart) return;
+    auto seriesList = chart->series();
+    if (seriesList.isEmpty()) return;
+    QPieSeries* series = qobject_cast<QPieSeries*>(seriesList.first());
+    if (!series) return;
+    series->clear();
+    series->append("Protein", protein);
+    series->append("Carbs", carbs);
+    series->append("Fat", fat);
+}
+void MainWindow::setupWeightTrackingPage()
+{
+    weightTrackingPage = new QWidget(this);
+    QVBoxLayout* mainLayout = new QVBoxLayout(weightTrackingPage);
+
+    // Set background gradient
+    weightTrackingPage->setStyleSheet(
+        "background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #232526, stop:1 #414345);"
+        );
+
+    // Title
+    QLabel* titleLabel = new QLabel("Weight Tracking", this);
+    QFont titleFont = titleLabel->font();
+    titleFont.setPointSize(24);
+    titleFont.setBold(true);
+    titleLabel->setFont(titleFont);
+    titleLabel->setAlignment(Qt::AlignCenter);
+    titleLabel->setStyleSheet("color: #00bfff; margin-bottom: 24px;");
+
+    // Back button
+    backFromWeightButton = new QPushButton("← Back", this);
+    backFromWeightButton->setFixedSize(90, 36);
+    backFromWeightButton->setStyleSheet(
+        "QPushButton {"
+        "  background-color: #222;"
+        "  color: #00bfff;"
+        "  border-radius: 8px;"
+        "  font-weight: bold;"
+        "  font-size: 16px;"
+        "  padding: 4px 12px;"
+        "  margin-bottom: 8px;"
+        "}"
+        "QPushButton:hover {"
+        "  background-color: #00bfff;"
+        "  color: #fff;"
+        "}"
+        );
+
+    // Input section
+    QGroupBox* inputBox = new QGroupBox("Add Weight Entry", this);
+    inputBox->setStyleSheet(
+        "QGroupBox {"
+        "  color: #fff;"
+        "  background: rgba(0,0,0,0.2);"
+        "  border: 1px solid #fff;"
+        "  border-radius: 8px;"
+        "  margin-top: 20px;"
+        "}"
+        );
+
+    QFormLayout* inputLayout = new QFormLayout(inputBox);
+    weightDateEdit = new QDateEdit(QDate::currentDate(), this);
+    weightDateEdit->setCalendarPopup(true);
+    weightDateEdit->setStyleSheet("background: rgba(255,255,255,0.1); color: #fff; border: 1px solid #fff; border-radius: 4px;");
+
+    weightInput = new QDoubleSpinBox(this);
+    weightInput->setRange(30, 300);
+    weightInput->setSuffix(" kg");
+    weightInput->setValue(70);
+    weightInput->setStyleSheet("background: rgba(255,255,255,0.1); color: #fff; border: 1px solid #fff; border-radius: 4px;");
+
+    addWeightButton = new QPushButton("Add Weight", this);
+    addWeightButton->setStyleSheet(
+        "QPushButton {"
+        "  background: #00bfff;"
+        "  color: white;"
+        "  border: none;"
+        "  border-radius: 4px;"
+        "  padding: 8px;"
+        "}"
+        "QPushButton:hover { background: #0099cc; }"
+        );
+
+    inputLayout->addRow("Date:", weightDateEdit);
+    inputLayout->addRow("Weight:", weightInput);
+    inputLayout->addRow(addWeightButton);
+
+    // Weight table
+    weightTable = new QTableWidget(0, 2, this);
+    weightTable->setHorizontalHeaderLabels({"Date", "Weight (kg)"});
+    weightTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    weightTable->setStyleSheet(
+        "QTableWidget {"
+        "  background: rgba(255,255,255,0.1);"
+        "  color: #fff;"
+        "  border: 1px solid #fff;"
+        "  border-radius: 4px;"
+        "}"
+        "QHeaderView::section {"
+        "  background: rgba(0,0,0,0.3);"
+        "  color: #fff;"
+        "  padding: 6px;"
+        "  border: none;"
+        "}"
+        );
+
+    deleteWeightButton = new QPushButton("Delete Selected", this);
+    deleteWeightButton->setStyleSheet(
+        "QPushButton {"
+        "  background: #ff4444;"
+        "  color: white;"
+        "  border: none;"
+        "  border-radius: 4px;"
+        "  padding: 8px;"
+        "}"
+        "QPushButton:hover { background: #cc0000; }"
+        );
+
+    // Weight chart
+    weightChartView = new QChartView(this);
+    weightChartView->setStyleSheet("background: transparent;");
+    weightChartView->setRenderHint(QPainter::Antialiasing);
+
+    // Layout organization
+    QHBoxLayout* topLayout = new QHBoxLayout();
+    topLayout->addWidget(inputBox, 1);
+    topLayout->addWidget(weightChartView, 2);
+
+    mainLayout->addWidget(backFromWeightButton, 0, Qt::AlignLeft);
+    mainLayout->addWidget(titleLabel);
+    mainLayout->addLayout(topLayout);
+    mainLayout->addWidget(weightTable);
+    mainLayout->addWidget(deleteWeightButton);
+
+    // Connect signals and slots
+    connect(backFromWeightButton, &QPushButton::clicked, this, &MainWindow::onBackFromWeightButtonClicked);
+    connect(addWeightButton, &QPushButton::clicked, this, &MainWindow::onAddWeightButtonClicked);
+    connect(deleteWeightButton, &QPushButton::clicked, this, &MainWindow::onDeleteWeightButtonClicked);
+    connect(weightTable, &QTableWidget::itemSelectionChanged, this, [this]() {
+        deleteWeightButton->setEnabled(weightTable->currentRow() >= 0);
+    });
+
+    // Initial state
+    deleteWeightButton->setEnabled(false);
+    updateWeightTable();
+    updateWeightChart();
+}
+
+
 
 void MainWindow::setupLoginPage()
 {
     // Create login page widget
     loginPage = new QWidget(this);
-    loginLayout = new QGridLayout(loginPage);
 
     // Set background image
     loginPage->setStyleSheet(
         "background-image: url(:/resources/gym.jpg);"
         "background-repeat: no-repeat;"
         "background-position: center;"
-        "background-size: contain;"
+        "background-size: cover;"
         );
 
+    // Outer layout for centering
+    QVBoxLayout* outerLayout = new QVBoxLayout(loginPage);
+    outerLayout->setAlignment(Qt::AlignCenter);
 
     // Semi-transparent overlay for the form
     QWidget* overlay = new QWidget(loginPage);
-    overlay->setStyleSheet("background: rgba(0, 0, 0, 0.2); border-radius: 20px;");
-    overlay->setGeometry(120, 40, 600, 400);
-    overlay->lower();
+    overlay->setMaximumWidth(500); // Responsive width
+    overlay->setStyleSheet(
+        "background: rgba(0, 0, 0, 0.4);"
+        "border-radius: 20px;"
+        "box-shadow: 0 8px 32px 0 rgba(0,0,0,0.37);"
+        );
+
+    // The actual login form layout inside the overlay
+    QGridLayout* loginLayout = new QGridLayout(overlay);
 
     // Create title
-    loginTitleLabel = new QLabel("FitLife Gym", this);
+    loginTitleLabel = new QLabel("FitLife Gym", overlay);
     QFont titleFont = loginTitleLabel->font();
     titleFont.setPointSize(24);
     titleFont.setBold(true);
@@ -177,8 +483,8 @@ void MainWindow::setupLoginPage()
     loginTitleLabel->setAlignment(Qt::AlignCenter);
 
     // Create username components
-    usernameLabel = new QLabel("Username:", this);
-    usernameInput = new QLineEdit(this);
+    usernameLabel = new QLabel("Username:", overlay);
+    usernameInput = new QLineEdit(overlay);
     usernameInput->setPlaceholderText("Enter your username");
     usernameInput->setStyleSheet(
         "QLineEdit {"
@@ -192,16 +498,16 @@ void MainWindow::setupLoginPage()
         );
 
     // Create password components
-    passwordLabel = new QLabel("Password:", this);
-    passwordInput = new QLineEdit(this);
+    passwordLabel = new QLabel("Password:", overlay);
+    passwordInput = new QLineEdit(overlay);
     passwordInput->setPlaceholderText("Enter your password");
     passwordInput->setEchoMode(QLineEdit::Password);
     passwordInput->setStyleSheet(usernameInput->styleSheet());
 
     // Create buttons
-    loginButton = new QPushButton(QIcon(":/resources/login.png"), "Login", this);
-    clearLoginButton = new QPushButton(QIcon(":/resources/clear.png"), "Clear", this);
-    showSignUpButton = new QPushButton("Create New Account", this);
+    loginButton = new QPushButton(QIcon(":/resources/login.png"), "Login", overlay);
+    clearLoginButton = new QPushButton(QIcon(":/resources/clear.png"), "Clear", overlay);
+    showSignUpButton = new QPushButton("Create New Account", overlay);
     QString buttonStyle =
         "QPushButton {"
         "background: rgba(0,0,0,0.3);"
@@ -218,21 +524,17 @@ void MainWindow::setupLoginPage()
     clearLoginButton->setStyleSheet(buttonStyle);
     showSignUpButton->setStyleSheet(buttonStyle);
 
-
-
     // Create status label
-    loginStatusLabel = new QLabel("Please log in to access the gym management system", this);
+    loginStatusLabel = new QLabel("Please log in to access the gym management system", overlay);
     loginStatusLabel->setAlignment(Qt::AlignCenter);
-    // For labels (optional, for extra clarity)
     loginTitleLabel->setStyleSheet("background: transparent; color: #fff; font-size: 32px; font-weight: bold;");
     loginStatusLabel->setStyleSheet("background: transparent; color: #fff;");
     usernameLabel->setStyleSheet("background: transparent; color: #fff;");
     passwordLabel->setStyleSheet("background: transparent; color: #fff;");
 
-
     // Add widgets to layout
     loginLayout->addWidget(loginTitleLabel, 0, 0, 1, 2);
-    loginLayout->addWidget(new QLabel("Login to Your Account", this), 1, 0, 1, 2, Qt::AlignCenter);
+    loginLayout->addWidget(new QLabel("Login to Your Account", overlay), 1, 0, 1, 2, Qt::AlignCenter);
     loginLayout->addWidget(usernameLabel, 2, 0);
     loginLayout->addWidget(usernameInput, 2, 1);
     loginLayout->addWidget(passwordLabel, 3, 0);
@@ -251,18 +553,23 @@ void MainWindow::setupLoginPage()
     loginLayout->setSpacing(15);
     loginLayout->setContentsMargins(40, 40, 40, 40);
 
-    // Add vertical space
-    loginLayout->setRowStretch(7, 1);
+    // Add the overlay to the outer layout, centered
+    outerLayout->addStretch(1);
+    outerLayout->addWidget(overlay, 0, Qt::AlignCenter);
+    outerLayout->addStretch(1);
+
+    // Set the layout for the login page
+    loginPage->setLayout(outerLayout);
 
     // Connect signals and slots
     connect(loginButton, &QPushButton::clicked, this, &MainWindow::onLoginButtonClicked);
     connect(clearLoginButton, &QPushButton::clicked, this, &MainWindow::onClearLoginButtonClicked);
     connect(showSignUpButton, &QPushButton::clicked, this, &MainWindow::onShowSignUpClicked);
-    //for pressing enter
     loginButton->setDefault(true);
     connect(passwordInput, &QLineEdit::returnPressed, this, &MainWindow::onLoginButtonClicked);
     connect(usernameInput, &QLineEdit::returnPressed, this, &MainWindow::onLoginButtonClicked);
 }
+
 // Save members list to a text file
 // Save members list to a text file
 void MainWindow::saveMembersToFile(const QString& filePath)
@@ -286,6 +593,34 @@ void MainWindow::saveMembersToFile(const QString& filePath)
         QMessageBox::warning(nullptr, "File Error", "Unable to save members data to file: " + filePath + "\nError: " + file.errorString());
         qDebug() << "Unable to save members data to file: " + filePath + "\nError: " + file.errorString();
     }
+}
+void MainWindow::saveWeightHistoryToFile() {
+    QFile file(weightHistoryFilePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return;
+    QTextStream out(&file);
+    out << "Date,Weight\n";
+    for (int i = 0; i < weightHistory.size(); ++i) {
+        out << weightHistory[i].first.toString(Qt::ISODate) << "," << weightHistory[i].second << "\n";
+    }
+    file.close();
+}
+
+void MainWindow::loadWeightHistoryFromFile() {
+    QFile file(weightHistoryFilePath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return;
+    QTextStream in(&file);
+    if (!in.atEnd()) in.readLine(); // skip header
+    weightHistory.clear();
+    while (!in.atEnd()) {
+        QStringList fields = in.readLine().split(",");
+        if (fields.size() == 2) {
+            QDate date = QDate::fromString(fields[0], Qt::ISODate);
+            double weight = fields[1].toDouble();
+            if (date.isValid())
+                weightHistory.append(qMakePair(date, weight));
+        }
+    }
+    file.close();
 }
 
 // Load members list from a text file
@@ -484,6 +819,7 @@ void MainWindow::setupDashboardPage()
     QPushButton* membersBtn = new QPushButton(QIcon(":/resources/members.png"), "Manage Members", this);
     QPushButton* workoutBtn = new QPushButton(QIcon(":/resources/workout.png"), "Workout Plans", this);
     QPushButton* calorieBtn = new QPushButton(QIcon(":/resources/calorie.png"), "Calorie Calculator", this);
+    QPushButton* weightBtn = new QPushButton(QIcon(":/resources/weight.png"), "Weight Tracking", this);
 
     QString cardStyle =
         "QPushButton {"
@@ -504,14 +840,17 @@ void MainWindow::setupDashboardPage()
     membersBtn->setStyleSheet(cardStyle);
     workoutBtn->setStyleSheet(cardStyle);
     calorieBtn->setStyleSheet(cardStyle);
+    weightBtn->setStyleSheet(cardStyle);
 
     membersBtn->setIconSize(QSize(40, 40));
     workoutBtn->setIconSize(QSize(40, 40));
     calorieBtn->setIconSize(QSize(40, 40));
+    weightBtn->setIconSize(QSize(40, 40));
 
     buttonLayout->addWidget(membersBtn);
     buttonLayout->addWidget(workoutBtn);
     buttonLayout->addWidget(calorieBtn);
+     buttonLayout->addWidget(weightBtn);
 
     mainLayout->addLayout(buttonLayout);
 
@@ -537,6 +876,7 @@ void MainWindow::setupDashboardPage()
     connect(membersBtn, &QPushButton::clicked, this, &MainWindow::onMembersButtonClicked);
     connect(workoutBtn, &QPushButton::clicked, this, &MainWindow::onWorkoutPlanButtonClicked);
     connect(calorieBtn, &QPushButton::clicked, this, &MainWindow::onCalorieCalculatorButtonClicked);
+    connect(weightBtn, &QPushButton::clicked, this, &MainWindow::onWeightTrackingButtonClicked);
 }
 
 void MainWindow::setupMembersPage()
@@ -612,190 +952,476 @@ void MainWindow::setupMembersPage()
 
 void MainWindow::setupWorkoutPage()
 {
-    // Create workout page widget
-    workoutPage = new QWidget(this);
-    workoutLayout = new QVBoxLayout(workoutPage);
+     // Create workout page widget
+        workoutPage = new QWidget(this);
+        QVBoxLayout* mainLayout = new QVBoxLayout(workoutPage);
 
-    // Create title
-    workoutTitle = new QLabel("Workout Plans", this);
-    QFont titleFont = workoutTitle->font();
-    titleFont.setPointSize(18);
-    titleFont.setBold(true);
-    workoutTitle->setFont(titleFont);
-    workoutTitle->setAlignment(Qt::AlignCenter);
 
-    // Create table
-    workoutTable = new QTableWidget(0, 5, this);
-    QStringList headers;
-    headers << "Exercise Name" << "Target Muscle" << "Description" << "Sets" << "Reps";
-    workoutTable->setHorizontalHeaderLabels(headers);
-    workoutTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
-    workoutTable->setSelectionBehavior(QAbstractItemView::SelectRows);
-    workoutTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        // Set background gradient
+        workoutPage->setStyleSheet(
+            "background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #232526, stop:1 #414345);"
+            );
 
-    // Create input fields for adding/editing workouts
-    QGridLayout *inputLayout = new QGridLayout();
-    inputLayout->addWidget(new QLabel("Exercise Name:"), 0, 0);
-    workoutNameInput = new QLineEdit(this);
-    inputLayout->addWidget(workoutNameInput, 0, 1);
+        // Title
+        QLabel* titleLabel = new QLabel("Workout Tracker", this);
+        QFont titleFont = titleLabel->font();
+        titleFont.setPointSize(24);
+        titleFont.setBold(true);
+        titleLabel->setFont(titleFont);
+        titleLabel->setAlignment(Qt::AlignCenter);
+        titleLabel->setStyleSheet("color: #00bfff; margin-bottom: 24px;");
+        QPushButton* backFromWorkoutButton = new QPushButton("← Back", this);
+        backFromWorkoutButton->setFixedSize(90, 36);
+        backFromWorkoutButton->setStyleSheet(
+            "QPushButton {"
+            "  background-color: #222;"
+            "  color: #00bfff;"
+            "  border-radius: 8px;"
+            "  font-weight: bold;"
+            "  font-size: 16px;"
+            "  padding: 4px 12px;"
+            "  margin-bottom: 8px;"
+            "}"
+            "QPushButton:hover {"
+            "  background-color: #00bfff;"
+            "  color: #fff;"
+            "}"
+         );
+        mainLayout->addWidget(titleLabel);
 
-    inputLayout->addWidget(new QLabel("Target Muscle:"), 0, 2);
-    workoutTargetInput = new QLineEdit(this);
-    inputLayout->addWidget(workoutTargetInput, 0, 3);
+        // Layouts
+        QHBoxLayout* topLayout = new QHBoxLayout();
 
-    inputLayout->addWidget(new QLabel("Description:"), 1, 0);
-    workoutDescInput = new QTextEdit(this);
-    workoutDescInput->setMaximumHeight(60);
-    inputLayout->addWidget(workoutDescInput, 1, 1, 1, 3);
+        // --- Left: Workout Input Form ---
+        QLabel* addWorkoutTitle = new QLabel("Add New Workout", this);
+        QFont addWorkoutFont = addWorkoutTitle->font();
+        addWorkoutFont.setPointSize(16);
+        addWorkoutFont.setBold(true);
+        addWorkoutTitle->setFont(addWorkoutFont);
+        addWorkoutTitle->setStyleSheet("color: #00bfff; margin-bottom: 8px;");
+        QGroupBox* inputBox = new QGroupBox("", this);
+        inputBox->setStyleSheet("color: #fff; background: rgba(0,0,0,0.2); border: 1px solid #fff; border-radius: 8px;");
 
-    inputLayout->addWidget(new QLabel("Sets:"), 2, 0);
-    workoutSetsInput = new QSpinBox(this);
-    workoutSetsInput->setMinimum(1);
-    workoutSetsInput->setMaximum(10);
-    inputLayout->addWidget(workoutSetsInput, 2, 1);
+        QVBoxLayout* inputSectionLayout = new QVBoxLayout();
+        inputSectionLayout->addWidget(addWorkoutTitle);
+        inputSectionLayout->addWidget(inputBox);
+        inputSectionLayout->setSpacing(8);
+        inputSectionLayout->setContentsMargins(0, 0, 0, 0);
+        // Workout name input
+        workoutNameInput = new QLineEdit(this);
+        workoutNameInput->setPlaceholderText("Enter workout name");
+        workoutNameInput->setStyleSheet("background: rgba(255,255,255,0.1); color: #fff; border: 1px solid #fff; border-radius: 4px; padding: 6px;");
 
-    inputLayout->addWidget(new QLabel("Reps:"), 2, 2);
-    workoutRepsInput = new QSpinBox(this);
-    workoutRepsInput->setMinimum(1);
-    workoutRepsInput->setMaximum(30);
-    inputLayout->addWidget(workoutRepsInput, 2, 3);
+        // Target muscle group
+        workoutTargetInput = new QComboBox(this);
+        workoutTargetInput->addItems({"Chest", "Back", "Legs", "Shoulders", "Arms", "Core", "Full Body"});
+        workoutTargetInput->setStyleSheet("background: rgba(255,255,255,0.1); color: #fff; border: 1px solid #fff; border-radius: 4px; padding: 6px;");
 
-    // Create buttons
-    workoutButtonsLayout = new QHBoxLayout();
-    addWorkoutButton = new QPushButton("Add Workout", this);
-    deleteWorkoutButton = new QPushButton("Delete Selected", this);
-    backFromWorkoutButton = new QPushButton("Back to Main Menu", this);
+        // Description
+        workoutDescInput = new QTextEdit(this);
+        workoutDescInput->setPlaceholderText("Enter workout description");
+        workoutDescInput->setStyleSheet("background: rgba(255,255,255,0.1); color: #fff; border: 1px solid #fff; border-radius: 4px; padding: 6px;");
 
-    workoutButtonsLayout->addWidget(addWorkoutButton);
-    workoutButtonsLayout->addWidget(deleteWorkoutButton);
-    workoutButtonsLayout->addWidget(backFromWorkoutButton);
+        // Sets and reps
+        workoutSetsInput = new QSpinBox(this);
+        workoutSetsInput->setRange(1, 20);
+        workoutSetsInput->setStyleSheet("background: rgba(255,255,255,0.1); color: #fff; border: 1px solid #fff; border-radius: 4px; padding: 6px;");
 
-    // Add widgets to layout
-    workoutLayout->addWidget(workoutTitle);
-    workoutLayout->addWidget(workoutTable);
-    workoutLayout->addLayout(inputLayout);
-    workoutLayout->addLayout(workoutButtonsLayout);
+        workoutRepsInput = new QSpinBox(this);
+        workoutRepsInput->setRange(1, 100);
+        workoutRepsInput->setStyleSheet("background: rgba(255,255,255,0.1); color: #fff; border: 1px solid #fff; border-radius: 4px; padding: 6px;");
+        QFormLayout* inputLayout = new QFormLayout(inputBox);
+        inputLayout->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        inputLayout->setFormAlignment(Qt::AlignTop | Qt::AlignLeft);
+        inputLayout->setSpacing(15);
 
-    // Set some spacing and margins
-    workoutLayout->setSpacing(15);
-    workoutLayout->setContentsMargins(20, 20, 20, 20);
+        // Add form fields
+        int labelWidth = 90; // Adjust as needed
+        QLabel* nameLabel = new QLabel("Name:");
+        nameLabel->setMinimumWidth(labelWidth);
+        QLabel* targetLabel = new QLabel("Target:");
+        targetLabel->setMinimumWidth(labelWidth);
+        QLabel* descLabel = new QLabel("Description:");
+        descLabel->setMinimumWidth(labelWidth);
+        QLabel* setsLabel = new QLabel("Sets:");
+        setsLabel->setMinimumWidth(labelWidth);
+        QLabel* repsLabel = new QLabel("Reps:");
+        repsLabel->setMinimumWidth(labelWidth);
 
-    // Connect signals and slots
-    connect(addWorkoutButton, &QPushButton::clicked, this, &MainWindow::onAddWorkoutButtonClicked);
-    connect(deleteWorkoutButton, &QPushButton::clicked, this, &MainWindow::onDeleteWorkoutButtonClicked);
-    connect(backFromWorkoutButton, &QPushButton::clicked, this, &MainWindow::onBackFromWorkoutButtonClicked);
-}
+        inputLayout->addRow(nameLabel, workoutNameInput);
+        inputLayout->addRow(targetLabel, workoutTargetInput);
+        inputLayout->addRow(descLabel, workoutDescInput);
+        inputLayout->addRow(setsLabel, workoutSetsInput);
+        inputLayout->addRow(repsLabel, workoutRepsInput);
+
+        // Add/Delete buttons
+        QHBoxLayout* buttonLayout = new QHBoxLayout();
+        QPushButton* addWorkoutButton = new QPushButton("Add Workout", this);
+         deleteWorkoutButton = new QPushButton("Delete Workout", this);
+
+        addWorkoutButton->setStyleSheet(
+            "QPushButton {"
+            "background: #00bfff;"
+            "color: white;"
+            "border: none;"
+            "border-radius: 4px;"
+            "padding: 8px;"
+            "}"
+            "QPushButton:hover { background: #0099cc; }"
+            );
+
+        deleteWorkoutButton->setStyleSheet(
+            "QPushButton {"
+            "background: #ff4444;"
+            "color: white;"
+            "border: none;"
+            "border-radius: 4px;"
+            "padding: 8px;"
+            "}"
+            "QPushButton:hover { background: #cc0000; }"
+            );
+
+        buttonLayout->addWidget(addWorkoutButton);
+        buttonLayout->addWidget(deleteWorkoutButton);
+        inputLayout->addRow("", buttonLayout);
+
+        // --- Right: Workout Table ---
+        QGroupBox* tableBox = new QGroupBox("", this);
+        tableBox->setStyleSheet("color: #fff; background: rgba(0,0,0,0.2); border: 1px solid #fff; border-radius: 8px;");
+        QVBoxLayout* tableLayout = new QVBoxLayout(tableBox);
+        QLabel* workoutListTitle = new QLabel("Workout List", this);
+        QFont workoutListFont = workoutListTitle->font();
+        workoutListFont.setPointSize(16);
+        workoutListFont.setBold(true);
+        workoutListTitle->setFont(workoutListFont);
+        workoutListTitle->setStyleSheet("color: #00bfff; margin-bottom: 8px;");
+        QVBoxLayout* tableSectionLayout = new QVBoxLayout();
+        tableSectionLayout->addWidget(workoutListTitle);
+        tableSectionLayout->addWidget(tableBox);
+        tableSectionLayout->addStretch();
+        workoutTable = new QTableWidget(this);
+        workoutTable->setColumnCount(5);
+        workoutTable->setHorizontalHeaderLabels({"Name", "Target", "Description", "Sets", "Reps"});
+        workoutTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+        workoutTable->setStyleSheet(
+            "QTableWidget {"
+            "background: rgba(255,255,255,0.1);"
+            "color: #fff;"
+            "border: 1px solid #fff;"
+            "border-radius: 4px;"
+            "}"
+            "QHeaderView::section {"
+            "background: rgba(0,0,0,0.3);"
+            "color: #fff;"
+            "padding: 6px;"
+            "border: none;"
+            "}"
+            "QTableWidget::item {"
+            "padding: 6px;"
+            "}"
+            );
+
+        tableLayout->addWidget(workoutTable);
+
+
+        // Add layouts to main layout
+        topLayout->addLayout(inputSectionLayout, 1);
+        topLayout->addLayout(tableSectionLayout, 2);
+        mainLayout->addLayout(topLayout);
+
+        // Connect signals and slots
+        connect(backFromWorkoutButton, &QPushButton::clicked, this, &MainWindow::onBackFromWorkoutButtonClicked);
+        mainLayout->addWidget(backFromWorkoutButton, 0, Qt::AlignLeft);
+        connect(addWorkoutButton, &QPushButton::clicked, this, &MainWindow::onAddWorkoutButtonClicked);
+        connect(deleteWorkoutButton, &QPushButton::clicked, this, &MainWindow::onDeleteWorkoutButtonClicked);
+        connect(workoutTable, &QTableWidget::itemSelectionChanged, this, [this]() {
+            deleteWorkoutButton->setEnabled(workoutTable->currentRow() >= 0);
+        });
+
+        // Initial state
+        deleteWorkoutButton->setEnabled(false);
+        updateWorkoutTable();
+    }
+
 
 void MainWindow::setupCaloriesPage()
 {
-    // Create calories page widget
     caloriesPage = new QWidget(this);
-    caloriesLayout = new QVBoxLayout(caloriesPage);
+    QVBoxLayout* mainLayout = new QVBoxLayout(caloriesPage);
+    QPushButton* backFromCaloriesButton = new QPushButton("← Back", this);
+    backFromCaloriesButton->setFixedSize(90, 36);
+    backFromCaloriesButton->setStyleSheet(
+        "QPushButton {"
+        "  background-color: #222;"
+        "  color: #00bfff;"
+        "  border-radius: 8px;"
+        "  font-weight: bold;"
+        "  font-size: 16px;"
+        "  padding: 4px 12px;"
+        "  margin-bottom: 8px;"
+        "}"
+        "QPushButton:hover {"
+        "  background-color: #00bfff;"
+        "  color: #fff;"
+        "}"
+        );
+    mainLayout->addWidget(backFromCaloriesButton, 0, Qt::AlignLeft);
 
-    // Create title
-    caloriesTitle = new QLabel("Calorie Calculator", this);
-    QFont titleFont = caloriesTitle->font();
-    titleFont.setPointSize(18);
+    // Set background gradient
+   /* caloriesPage->setStyleSheet(
+        "background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #232526, stop:1 #414345);"
+        );*/
+
+    // Title
+    QLabel* bmrTitle = new QLabel("BMR Calculator", this);
+    bmrTitle->setStyleSheet("color: #00bfff; font-size: 18px; font-weight: bold; margin-top: 16px;");
+
+    QFormLayout* bmrForm = new QFormLayout();
+    QDoubleSpinBox* bmrWeight = new QDoubleSpinBox(this);
+    bmrWeight->setRange(30, 300);
+    bmrWeight->setSuffix(" kg");
+    bmrWeight->setValue(70);
+
+    QDoubleSpinBox* bmrHeight = new QDoubleSpinBox(this);
+    bmrHeight->setRange(100, 250);
+    bmrHeight->setSuffix(" cm");
+    bmrHeight->setValue(170);
+
+    QSpinBox* bmrAge = new QSpinBox(this);
+    bmrAge->setRange(10, 100);
+    bmrAge->setValue(25);
+
+    QComboBox* bmrGender = new QComboBox(this);
+    bmrGender->addItems({"Male", "Female"});
+
+    QPushButton* calcBmrBtn = new QPushButton("Calculate BMR", this);
+    calcBmrBtn->setStyleSheet("background: #00bfff; color: #fff; border-radius: 8px; font-weight: bold;");
+
+    QLabel* bmrResult = new QLabel("BMR: -- kcal/day", this);
+    bmrResult->setStyleSheet("color: #fff; font-size: 15px; font-weight: bold;");
+
+    bmrForm->addRow("Weight:", bmrWeight);
+    bmrForm->addRow("Height:", bmrHeight);
+    bmrForm->addRow("Age:", bmrAge);
+    bmrForm->addRow("Gender:", bmrGender);
+    bmrForm->addRow(calcBmrBtn);
+    bmrForm->addRow(bmrResult);
+
+
+    QLabel* titleLabel = new QLabel("Calorie & Macro Tracker", this);
+    QFont titleFont = titleLabel->font();
+    titleFont.setPointSize(24);
     titleFont.setBold(true);
-    caloriesTitle->setFont(titleFont);
-    caloriesTitle->setAlignment(Qt::AlignCenter);
+    titleLabel->setFont(titleFont);
+    titleLabel->setAlignment(Qt::AlignCenter);
+    titleLabel->setStyleSheet("color: #00bfff; margin-bottom: 24px;");
+    mainLayout->addWidget(titleLabel);
 
-    // Personal Information Group
-    personalInfoGroup = new QGroupBox("Personal Information");
-    personalInfoLayout = new QFormLayout();
+    // Layouts
+    QHBoxLayout* topLayout = new QHBoxLayout();
+    QVBoxLayout* leftLayout = new QVBoxLayout();
+    QVBoxLayout* centerLayout = new QVBoxLayout();
+    QVBoxLayout* rightLayout = new QVBoxLayout();
 
-    ageInput = new QSpinBox(this);
-    ageInput->setRange(13, 100);
-    ageInput->setValue(30);
-    personalInfoLayout->addRow("Age:", ageInput);
+    // --- Left: Food Search & Add ---
+    QLabel* searchLabel = new QLabel("Search Food:", this);
+    searchLabel->setStyleSheet("color: #fff;");
+    QLineEdit* foodSearchInput = new QLineEdit(this);
+    foodSearchInput->setPlaceholderText("Type food name...");
+    foodSearchInput->setStyleSheet("background: rgba(0,0,0,0.2); color: #fff; border: 1px solid #fff; border-radius: 6px; padding: 6px; font-size: 15px;");
+    QListWidget* foodSearchResults = new QListWidget(this);
+    foodSearchResults->setStyleSheet("background: rgba(0,0,0,0.2); color: #fff; border-radius: 6px;");
+    foodSearchResults->setObjectName("foodSearchResults");
+    leftLayout->addWidget(searchLabel);
+    leftLayout->addWidget(foodSearchInput);
+    leftLayout->addWidget(foodSearchResults);
 
-    genderGroup = new QButtonGroup(this);
-    maleRadio = new QRadioButton("Male", this);
-    femaleRadio = new QRadioButton("Female", this);
-    maleRadio->setChecked(true);
-    genderGroup->addButton(maleRadio);
-    genderGroup->addButton(femaleRadio);
+    // Custom food addition
+    QGroupBox* customFoodBox = new QGroupBox("Add Custom Food", this);
+    customFoodBox->setStyleSheet(
+        "QGroupBox {"
+        "  color: #fff;"
+        "  background: transparent;"
+        "  border: 1px solid #fff;"
+        "  border-radius: 8px;"
+        "  margin-top: 20px;" // Add space for the title
+        "}"
+        "QGroupBox::title {"
+        "  subcontrol-origin: margin;"
+        "  left: 10px;"
+        "  top: 2px;"
+        "  padding: 0 4px;"
+        "  background: transparent;"
+        "}"
+        );
+    QFormLayout* customFoodLayout = new QFormLayout(customFoodBox);
+    customFoodLayout->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    customFoodLayout->setFormAlignment(Qt::AlignLeft | Qt::AlignTop);
+    customFoodLayout->setHorizontalSpacing(10);
+    customFoodLayout->setVerticalSpacing(8);
+    QLineEdit* customFoodName = new QLineEdit(this);
+    QDoubleSpinBox* customFoodCalories = new QDoubleSpinBox(this);
+    customFoodCalories->setRange(0, 2000);
+    customFoodCalories->setSuffix(" kcal");
+    QDoubleSpinBox* customFoodProtein = new QDoubleSpinBox(this);
+    customFoodProtein->setRange(0, 200);
+    customFoodProtein->setSuffix(" g");
+    QDoubleSpinBox* customFoodCarbs = new QDoubleSpinBox(this);
+    customFoodCarbs->setRange(0, 200);
+    customFoodCarbs->setSuffix(" g");
+    QDoubleSpinBox* customFoodFat = new QDoubleSpinBox(this);
+    customFoodFat->setRange(0, 100);
+    customFoodFat->setSuffix(" g");
+    QPushButton* addCustomFoodButton = new QPushButton("Add Food", this);
+    addCustomFoodButton->setStyleSheet("background: rgba(0,0,0,0.3); color: #fff; border-radius: 8px; border: 1px solid #fff;");
+    customFoodLayout->addRow("Name:", customFoodName);
+    customFoodLayout->addRow("Calories:", customFoodCalories);
+    customFoodLayout->addRow("Protein:", customFoodProtein);
+    customFoodLayout->addRow("Carbs:", customFoodCarbs);
+    customFoodLayout->addRow("Fat:", customFoodFat);
+    customFoodLayout->addRow(addCustomFoodButton);
+    leftLayout->addWidget(customFoodBox);
+    leftLayout->addStretch();
 
-    QHBoxLayout *genderLayout = new QHBoxLayout();
-    genderLayout->addWidget(maleRadio);
-    genderLayout->addWidget(femaleRadio);
-    personalInfoLayout->addRow("Gender:", genderLayout);
+    // --- Center: Diary & Meal Selection ---
+    QLabel* diaryTitle = new QLabel("Daily Food Diary", this);
+    diaryTitle->setStyleSheet("color: #fff; font-size: 20px; font-weight: bold;");
+    QDateEdit* diaryDateEdit = new QDateEdit(QDate::currentDate(), this);
+    diaryDateEdit->setCalendarPopup(true);
+    diaryDateEdit->setStyleSheet("background: rgba(0,0,0,0.2); color: #fff; border-radius: 6px;");
+    diaryDateEdit->setObjectName("diaryDateEdit");
+    QComboBox* mealCombo = new QComboBox(this);
+    mealCombo->addItems({"Breakfast", "Lunch", "Dinner", "Snack"});
+    mealCombo->setStyleSheet("background: rgba(0,0,0,0.2); color: #fff; border-radius: 6px;");
+    mealCombo->setObjectName("mealCombo");
+    QTableWidget* diaryTable = new QTableWidget(0, 5, this);
+    diaryTable->setObjectName("diaryTable");
+    QStringList diaryHeaders = {"Food", "Calories", "Protein", "Carbs", "Fat"};
+    diaryTable->setHorizontalHeaderLabels(diaryHeaders);
+    diaryTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    diaryTable->setStyleSheet("background: rgba(0,0,0,0.2); color: #fff; border-radius: 6px;");
+    QPushButton* removeFoodButton = new QPushButton("Remove Selected", this);
+    removeFoodButton->setStyleSheet("background: rgba(0,0,0,0.3); color: #fff; border-radius: 8px; border: 1px solid #fff;");
+    centerLayout->addWidget(diaryTitle);
+    QHBoxLayout* dateMealLayout = new QHBoxLayout();
+    dateMealLayout->addWidget(new QLabel("Date:", this));
+    dateMealLayout->addWidget(diaryDateEdit);
+    dateMealLayout->addWidget(new QLabel("Meal:", this));
+    dateMealLayout->addWidget(mealCombo);
+    centerLayout->addLayout(dateMealLayout);
+    centerLayout->addWidget(diaryTable);
+    centerLayout->addWidget(removeFoodButton);
+    centerLayout->addStretch();
 
-    weightInput = new QDoubleSpinBox(this);
-    weightInput->setRange(30.0, 300.0);
-    weightInput->setValue(70.0);
-    weightInput->setSuffix(" kg");
-    personalInfoLayout->addRow("Weight:", weightInput);
+    // --- Right: Nutrition Summary, Goal, Progress, Macros ---
+    QLabel* summaryTitle = new QLabel("Nutrition Summary", this);
+    summaryTitle->setStyleSheet("color: #fff; font-size: 20px; font-weight: bold;");
+    QLabel* caloriesLabel = new QLabel("Calories: 0 kcal", this);
+    caloriesLabel->setObjectName("caloriesLabel");
+    QLabel* proteinLabel = new QLabel("Protein: 0 g", this);
+    proteinLabel->setObjectName("proteinLabel");
+    QLabel* carbsLabel = new QLabel("Carbs: 0 g", this);
+    carbsLabel->setObjectName("carbsLabel");
+    QLabel* fatLabel = new QLabel("Fat: 0 g", this);
+    fatLabel->setObjectName("fatLabel");
+    caloriesLabel->setStyleSheet("color: #fff;");
+    proteinLabel->setStyleSheet("color: #fff;");
+    carbsLabel->setStyleSheet("color: #fff;");
+    fatLabel->setStyleSheet("color: #fff;");
+    rightLayout->addWidget(summaryTitle);
+    rightLayout->addWidget(caloriesLabel);
+    rightLayout->addWidget(proteinLabel);
+    rightLayout->addWidget(carbsLabel);
+    rightLayout->addWidget(fatLabel);
 
-    heightInput = new QDoubleSpinBox(this);
-    heightInput->setRange(100.0, 250.0);
-    heightInput->setValue(170.0);
-    heightInput->setSuffix(" cm");
-    personalInfoLayout->addRow("Height:", heightInput);
+    QLabel* goalLabel = new QLabel("Daily Calorie Goal:", this);
+    goalLabel->setStyleSheet("color: #fff;");
+    QSpinBox* goalSpin = new QSpinBox(this);
+    goalSpin->setObjectName("goalSpin");
+    goalSpin->setRange(1000, 6000);
+    goalSpin->setValue(2200);
+    goalSpin->setSuffix(" kcal");
+    QProgressBar* calorieProgress = new QProgressBar(this);
+    calorieProgress->setObjectName("calorieProgress");
+    calorieProgress->setRange(0, 6000);
+    calorieProgress->setValue(0);
+    calorieProgress->setStyleSheet("QProgressBar { background: #222; color: #fff; border-radius: 8px; } QProgressBar::chunk { background: #0078d7; }");
+    rightLayout->addWidget(goalLabel);
+    rightLayout->addWidget(goalSpin);
+    rightLayout->addWidget(calorieProgress);
+    rightLayout->addWidget(bmrTitle);
+    rightLayout->addLayout(bmrForm);
 
-    personalInfoGroup->setLayout(personalInfoLayout);
+    // Macro pie chart (Qt Charts)
+    QChartView* macroChartView = nullptr;
+#if QT_VERSION >= QT_VERSION_CHECK(5, 7, 0)
+    QPieSeries* macroSeries = new QPieSeries();
+    macroSeries->append("Protein", 1);
+    macroSeries->append("Carbs", 1);
+    macroSeries->append("Fat", 1);
+    QChart* macroChart = new QChart();
+    macroChart->addSeries(macroSeries);
+    macroChart->setTitle("Macros");
+    macroChart->setBackgroundVisible(false);
+    macroChartView = new QChartView(macroChart, this);
+    macroChartView->setObjectName("macroChartView");
+    macroChartView->setStyleSheet("background: transparent;");
+    macroChartView->setRenderHint(QPainter::Antialiasing);
+    rightLayout->addWidget(macroChartView);
+#endif
+    rightLayout->addStretch();
 
-    // Activity Level Group
-    activityGroup = new QGroupBox("Activity Level");
-    activityLayout = new QFormLayout();
+    // --- Add layouts to main ---
+    topLayout->addLayout(leftLayout, 2);
+    topLayout->addLayout(centerLayout, 4);
+    topLayout->addLayout(rightLayout, 2);
+    mainLayout->addLayout(topLayout);
+    mainLayout->addStretch();
 
-    activityLevelCombo = new QComboBox(this);
-    activityLevelCombo->addItem("Sedentary (little or no exercise)");
-    activityLevelCombo->addItem("Lightly active (light exercise 1-3 days/week)");
-    activityLevelCombo->addItem("Moderately active (moderate exercise 3-5 days/week)");
-    activityLevelCombo->addItem("Very active (hard exercise 6-7 days/week)");
-    activityLevelCombo->addItem("Extra active (very hard exercise & physical job)");
-
-    activityLayout->addRow("Activity Level:", activityLevelCombo);
-
-    activityDescriptionLabel = new QLabel("Your activity level affects your daily calorie needs", this);
-    activityDescriptionLabel->setWordWrap(true);
-    activityLayout->addRow(activityDescriptionLabel);
-
-    activityGroup->setLayout(activityLayout);
-
-    // Results Group
-    resultsGroup = new QGroupBox("Calorie Results");
-    resultsLayout = new QFormLayout();
-
-    bmrResultLabel = new QLabel("0 calories/day", this);
-    tdeeResultLabel = new QLabel("0 calories/day", this);
-    weightLossLabel = new QLabel("0 calories/day", this);
-    maintainWeightLabel = new QLabel("0 calories/day", this);
-    weightGainLabel = new QLabel("0 calories/day", this);
-
-    resultsLayout->addRow("Basal Metabolic Rate (BMR):", bmrResultLabel);
-    resultsLayout->addRow("Total Daily Energy Expenditure:", tdeeResultLabel);
-    resultsLayout->addRow("Weight Loss (0.5kg/week):", weightLossLabel);
-    resultsLayout->addRow("Maintain Weight:", maintainWeightLabel);
-    resultsLayout->addRow("Weight Gain (0.5kg/week):", weightGainLabel);
-
-    resultsGroup->setLayout(resultsLayout);
-
-    // Buttons
-    calculateCaloriesButton = new QPushButton("Calculate", this);
-    backFromCaloriesButton = new QPushButton("Back to Main Menu", this);
-
-    QHBoxLayout *buttonsLayout = new QHBoxLayout();
-    buttonsLayout->addWidget(calculateCaloriesButton);
-    buttonsLayout->addWidget(backFromCaloriesButton);
-
-    // Add widgets to layout
-    caloriesLayout->addWidget(caloriesTitle);
-    caloriesLayout->addWidget(personalInfoGroup);
-    caloriesLayout->addWidget(activityGroup);
-    caloriesLayout->addWidget(resultsGroup);
-    caloriesLayout->addLayout(buttonsLayout);
-
-    // Set some spacing and margins
-    caloriesLayout->setSpacing(15);
-    caloriesLayout->setContentsMargins(20, 20, 20, 20);
-
-    // Connect signals and slots
-    connect(calculateCaloriesButton, &QPushButton::clicked, this, &MainWindow::onCalculateCaloriesButtonClicked);
+    // --- Connect signals and slots ---
     connect(backFromCaloriesButton, &QPushButton::clicked, this, &MainWindow::onBackFromCaloriesButtonClicked);
-    connect(activityLevelCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MainWindow::onActivityLevelChanged);
-    connect(maleRadio, &QRadioButton::toggled, this, &MainWindow::onGenderSelectionChanged);
+    connect(foodSearchInput, &QLineEdit::textChanged, this, &MainWindow::onFoodSearchTextChanged);
+    connect(foodSearchResults, &QListWidget::itemClicked, this, &MainWindow::onFoodSelected);
+    connect(diaryDateEdit, &QDateEdit::dateChanged, this, &MainWindow::updateNutritionSummary);
+    connect(mealCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MainWindow::updateNutritionSummary);
+    connect(goalSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, &MainWindow::updateNutritionSummary);
+    connect(removeFoodButton, &QPushButton::clicked, this, [this, diaryTable]() {
+        int currentRow = diaryTable->currentRow();
+        if (currentRow >= 0) {
+            diaryTable->removeRow(currentRow);
+            updateNutritionSummary();
+        }
+    });
+   connect(addCustomFoodButton, &QPushButton::clicked, this, [this, customFoodName, customFoodCalories, customFoodProtein, customFoodCarbs, customFoodFat, foodSearchInput]() {
+        if (customFoodName->text().isEmpty()) return;
+        Food newFood;
+        newFood.name = customFoodName->text();
+        newFood.calories = customFoodCalories->value();
+        newFood.protein = customFoodProtein->value();
+        newFood.carbs = customFoodCarbs->value();
+        newFood.fat = customFoodFat->value();
+        foods.append(newFood);
+        saveFoodsToFile();
+        customFoodName->clear();
+        customFoodCalories->setValue(0);
+        customFoodProtein->setValue(0);
+        customFoodCarbs->setValue(0);
+        customFoodFat->setValue(0);
+        onFoodSearchTextChanged(foodSearchInput->text());
+    });
+    connect(calcBmrBtn, &QPushButton::clicked, this, [=]() {
+        double weight = bmrWeight->value();
+        double height = bmrHeight->value();
+        int age = bmrAge->value();
+        bool isMale = (bmrGender->currentIndex() == 0);
+
+        // Use your existing formula directly here
+        double bmr = isMale
+                         ? (10 * weight) + (6.25 * height) - (5 * age) + 5
+                         : (10 * weight) + (6.25 * height) - (5 * age) - 161;
+
+        bmrResult->setText(QString("BMR: %1 kcal/day").arg(qRound(bmr)));
+    });
 }
 
 void MainWindow::onLoginButtonClicked()
@@ -807,7 +1433,7 @@ void MainWindow::onLoginButtonClicked()
     if (userCredentials.contains(username) && userCredentials[username] == password) {
         currentUser = username;
         loginStatusLabel->setText("Login successful!");
-       // welcomeLabel->setText("Welcome to FitLife Gym Management System, " + username + "!");
+        // welcomeLabel->setText("Welcome to FitLife Gym Management System, " + username + "!");
 
         // Update tables
         updateMembersTable();
@@ -976,6 +1602,52 @@ void MainWindow::onBackFromCaloriesButtonClicked()
 {
     stackedWidget->setCurrentWidget(dashboardPage);
 }
+void MainWindow::onWeightTrackingButtonClicked()
+{
+    stackedWidget->setCurrentWidget(weightTrackingPage);
+}
+void MainWindow::onAddWeightButtonClicked()
+{
+    QDate date = weightDateEdit->date();
+    double weight = weightInput->value();
+
+    // Add to history
+    weightHistory.append(qMakePair(date, weight));
+
+    // Sort by date
+    std::sort(weightHistory.begin(), weightHistory.end(),
+              [](const QPair<QDate, double>& a, const QPair<QDate, double>& b) {
+                  return a.first < b.first;
+              });
+
+    updateWeightTable();
+    updateWeightChart();
+    saveWeightHistoryToFile();
+
+    QMessageBox::information(this, "Success", "Weight entry added successfully!");
+}
+void MainWindow::onDeleteWeightButtonClicked()
+{
+    int selectedRow = weightTable->currentRow();
+    if (selectedRow >= 0 && selectedRow < weightHistory.size()) {
+        QMessageBox::StandardButton reply;
+        reply = QMessageBox::question(this, "Confirm Delete",
+                                      "Are you sure you want to delete this weight entry?",
+                                      QMessageBox::Yes | QMessageBox::No);
+
+        if (reply == QMessageBox::Yes) {
+            weightHistory.removeAt(selectedRow);
+            updateWeightTable();
+            updateWeightChart();
+            saveWeightHistoryToFile();
+            QMessageBox::information(this, "Success", "Weight entry deleted successfully!");
+        }
+    }
+}
+void MainWindow::onBackFromWeightButtonClicked()
+{
+    stackedWidget->setCurrentWidget(dashboardPage);
+}
 
 void MainWindow::updateMembersTable()
 {
@@ -1038,6 +1710,46 @@ void MainWindow::updateWorkoutTable()
         workoutTable->setItem(i, 3, new QTableWidgetItem(QString::number(workouts[i].sets)));
         workoutTable->setItem(i, 4, new QTableWidgetItem(QString::number(workouts[i].reps)));
     }
+}
+//workout table update
+void MainWindow::updateWeightTable()
+{
+    weightTable->setRowCount(0);
+    for (int i = 0; i < weightHistory.size(); ++i) {
+        weightTable->insertRow(i);
+        weightTable->setItem(i, 0, new QTableWidgetItem(weightHistory[i].first.toString("dd/MM/yyyy")));
+        weightTable->setItem(i, 1, new QTableWidgetItem(QString::number(weightHistory[i].second)));
+    }
+}
+void MainWindow::updateWeightChart()
+{
+
+    QChart* chart = new QChart();
+    chart->setTitle("Weight Progress");
+    chart->setBackgroundVisible(false);
+    chart->legend()->setVisible(false);
+
+    QLineSeries* series = new QLineSeries();
+    for (int i = 0; i < weightHistory.size(); ++i) {
+        // Use QDateTime for the x value
+        QDateTime dt(weightHistory[i].first, QTime(0, 0));
+        series->append(dt.toMSecsSinceEpoch(), weightHistory[i].second);
+    }
+
+    chart->addSeries(series);
+
+    QDateTimeAxis* axisX = new QDateTimeAxis();
+    axisX->setFormat("dd/MM/yyyy");
+    axisX->setTitleText("Date");
+    chart->addAxis(axisX, Qt::AlignBottom);
+    series->attachAxis(axisX);
+
+    QValueAxis* axisY = new QValueAxis();
+    axisY->setTitleText("Weight (kg)");
+    chart->addAxis(axisY, Qt::AlignLeft);
+    series->attachAxis(axisY);
+
+    weightChartView->setChart(chart);
 }
 
 void MainWindow::onAddMemberButtonClicked()
@@ -1161,7 +1873,7 @@ void MainWindow::onEditMemberButtonClicked()
 void MainWindow::onAddWorkoutButtonClicked()
 {
     QString name = workoutNameInput->text();
-    QString target = workoutTargetInput->text();
+   QString target = workoutTargetInput->currentText();
     QString description = workoutDescInput->toPlainText();
     int sets = workoutSetsInput->value();
     int reps = workoutRepsInput->value();
