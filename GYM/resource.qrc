@@ -1,0 +1,12 @@
+<RCC>
+    <qresource prefix="/resources">
+        <file>login.png</file>
+        <file>clear.png</file>
+        <file>gym.jpg</file>
+        <file>register.png</file>
+        <file>workout.png</file>
+        <file>members.png</file>
+        <file>calorie.png</file>
+        <file>weight.png</file>
+    </qresource>
+</RCC>
