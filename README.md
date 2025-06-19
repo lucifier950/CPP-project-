@@ -9,14 +9,14 @@ A user-friendly Gym Management System built for tracking health and fitness goal
 - ⚖️ **Weight Monitoring** – Track weight changes over time
 - 📝 **Workout Scheduling** – Plan and record workouts
 - 🧮 **BMI Calculator** – Automatically compute BMI using weight and height
-- 📊 **Progress Visualization** (if applicable)
+- 📊 **Progress Visualization** 
 - 💾 **Data Persistence** – Save user data locally (or to a database)
 
 ## 💻 Tech Stack
 
-- **Language**: C++ / Java / Python (Mention whichever you're using)
-- **GUI**: Qt / Tkinter / CLI (Mention the UI framework if applicable)
-- **Database**: SQLite / File System (if used)
+- **Language**: C++ 
+- **GUI**: Qt 
+- **Database**: = File System 
 
 ## 🚀 Getting Started
 
@@ -25,7 +25,7 @@ A user-friendly Gym Management System built for tracking health and fitness goal
 Make sure you have the following installed:
 
 - C++ Compiler (like g++)
-- Qt (if GUI used)
+- Qt 
 - Git
 
 ### Installation
